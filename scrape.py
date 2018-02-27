@@ -97,21 +97,28 @@ def resample_hourly(df):
 
   return df.resample('1H').agg(agg_methods)
 
-def pivot_daily(s):
+
+def pivot_day_of_year(s):
   return pd.pivot(index=s.index.date,columns=s.index.time,values=s)
+
 
 def plot_hours(df_daily, start, step):
   df_daily[df_daily.columns[start:24:step]].plot(linestyle=' ', marker='o',
       grid=True, fillstyle='none')
-  plt.show()
 
-def plot_temp_vs_hours_by_month(df):
+
+def plot_temp_vs_day_of_year_by_hour(df):
+    df_hourly = resample_hourly(df)
+    plot_hours(pivot_day_of_year(df_hourly.TemperatureF), 4, 4)
+
+
+def plot_temp_vs_hour_by_month(df):
     df.pivot_table(
         index=df.index.hour,
         columns=df.index.month,
         values='TemperatureF',
         aggfunc=np.mean).plot()
-    plt.show()
+
 
 def plot_rain_vs_month_by_year(df, cumulative=False):
     rain_series = df.dailyrainin.resample('1d').last().resample('1M').sum()
@@ -128,4 +135,23 @@ def plot_rain_vs_month_by_year(df, cumulative=False):
     if cumulative:
         rain_pivot_water_year = rain_pivot_water_year.cumsum()
     rain_pivot_water_year.plot(kind='bar')
-    plt.show()
+
+
+def generate_all_figs(path):
+    df = load_csv(path)
+
+    plot_temp_vs_day_of_year_by_hour(df)
+    plt.savefig('temp-vs-day-of-year-by-hour.pdf')
+    plt.clf()
+
+    plot_temp_vs_hour_by_month(df)
+    plt.savefig('temp-vs-hour-by-month.pdf')
+    plt.clf()
+
+    plot_rain_vs_month_by_year(df, cumulative=False)
+    plt.savefig('rain-vs-month-by-year.pdf')
+    plt.clf()
+
+    plot_rain_vs_month_by_year(df, cumulative=True)
+    plt.savefig('cumulative-rain-vs-month-by-year.pdf')
+    plt.clf()
