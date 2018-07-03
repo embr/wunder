@@ -2,7 +2,11 @@ import requests
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import dates
 from dateutil import rrule
+from pysolar import solar
+from pysolar import radiation
+import pytz
 import time
 import io
 
@@ -68,10 +72,32 @@ def get_rainfall(station, start_date, end_date):
     df.to_csv("{}_rainfall_hourly.csv".format(station))
     return df
 
-def load_csv(path):
-  df = pd.read_csv(path, parse_dates=True, index_col='Time')
+def load_csv(path, tz_name='US/Pacific'):
+  df = pd.read_csv(path, parse_dates=True, index_col='DateUTC')
+  df.index = df.index.tz_localize('UTC').tz_convert(tz_name)
+  df.index = df.index.rename('Datetime (US/Pacific)')
   df.loc[df.TemperatureF < 0, ['TemperatureF']] = np.nan
   return df
+
+class SolarRadiationAtPlace(object):
+
+  def __init__(self, lat, lng):
+    self.lat = lat
+    self.lng = lng
+
+  def __call__(self, dt):
+    try:
+      alt = solar.get_altitude(self.lat, self.lng, dt)
+      if alt < 0:
+        return 0
+      return radiation.get_radiation_direct(dt, alt)
+    except OverflowError:
+      return None
+
+def add_solar_radiation(df, lat, lng):
+  df_solar = df.copy()
+  df_solar['SolarRadiation'] = df.index.map(SolarRadiationAtPlace(lat, lng))
+  return df_solar
 
 def resample_hourly(df):
   # deafult take first
@@ -136,6 +162,29 @@ def plot_rain_vs_month_by_year(df, cumulative=False):
         rain_pivot_water_year = rain_pivot_water_year.cumsum()
     rain_pivot_water_year.plot(kind='bar')
 
+def plot_temp_and_solar(df_solar, num_points, plot_pressure=False,
+        plot_wind=False):
+    # store first axis
+    df_plot = df_solar.iloc[-num_points:,:]
+    ax = df_plot.SolarRadiation.plot()
+    df_plot.TemperatureF.plot(secondary_y=True)
+    if plot_pressure:
+        df_plot.PressureIn.plot(secondary_y=True)
+    if plot_wind:
+        df_plot.WindSpeedMPH.plot(secondary_y=True)
+    tzinfo = pytz.timezone('US/Pacific')
+    ax.xaxis.set_minor_locator(dates.HourLocator(interval=6))
+    ax.xaxis.grid(True, which='minor')
+
+def subplots(df, columns, start_date, end_date):
+    df_plot = df[(df.index >= start_date) & (df.index < end_date)]
+    fig, axes = plt.subplots(nrows=len(columns), ncols=1, sharex=True)
+    tzinfo = pytz.timezone('US/Pacific')
+    for col, ax in zip(columns, axes):
+        df_plot[col].plot(ax=ax, label=col)
+        ax.legend(loc='upper right')
+        ax.xaxis.set_minor_locator(dates.HourLocator(interval=6))
+        ax.xaxis.grid(True, which='minor')
 
 def generate_all_figs(path):
     df = load_csv(path)
