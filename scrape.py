@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import dates
+import math
 from dateutil import rrule
 from pysolar import solar
 from pysolar import radiation
@@ -79,28 +80,32 @@ def load_csv(path, tz_name='US/Pacific'):
   df.loc[df.TemperatureF < 0, ['TemperatureF']] = np.nan
   return df
 
-class SolarRadiationAtPlace(object):
+class SolarInfoAtPlace(object):
 
   def __init__(self, lat, lng):
     self.lat = lat
     self.lng = lng
 
-  def __call__(self, dt):
-    try:
-      alt = solar.get_altitude(self.lat, self.lng, dt)
-      if alt < 0:
-        return 0
-      return radiation.get_radiation_direct(dt, alt)
-    except OverflowError:
-      return None
+  def __call__(self, row_in):
+    row_out = pd.Series()
+    dt = pd.Timestamp(row_in.name).to_pydatetime()
+    alt = solar.get_altitude(self.lat, self.lng, dt)
+    row_out['SolarAltitude'] = alt
+    if alt < 0:
+      row_out['SolarRadiationNorm'] = 0
+      row_out['SolarRadiationHoriz'] = 0
+      return row_out
+    norm_rad = radiation.get_radiation_direct(dt, alt)
+    row_out['SolarRadiationNorm']  = norm_rad
+    row_out['SolarRadiationHoriz'] = math.cos(math.radians(alt)) * norm_rad
+    return row_out
 
 def add_solar_radiation(df, lat, lng):
-  df_solar = df.copy()
-  df_solar['SolarRadiation'] = df.index.map(SolarRadiationAtPlace(lat, lng))
-  return df_solar
+  return pd.concat([df.copy() , df.apply(SolarInfoAtPlace(lat, lng), axis=1)],
+          axis=1)
 
-def resample_hourly(df):
-  # deafult take first
+def resample(df, rule):
+  # default take first
   agg_methods = dict(zip(df.columns, ['first'] * len(df.columns)))
 
   # for point samples take average
@@ -110,7 +115,9 @@ def resample_hourly(df):
       'PressureIn',
       'TemperatureF',
       'WindDirectionDegrees',
-      'WindSpeedMPH'
+      'WindSpeedMPH',
+      'SolarRadiationHoriz',
+      'SolarRadiation'
   ]
   agg_methods.update(dict(zip(avg_cols, ['mean'] * len(df.columns))))
 
@@ -121,7 +128,7 @@ def resample_hourly(df):
       'dailyrainin' : 'last'
   })
 
-  return df.resample('1H').agg(agg_methods)
+  return df.resample(rule).agg(agg_methods)
 
 
 def pivot_day_of_year(s):
@@ -134,7 +141,7 @@ def plot_hours(df_daily, start, step):
 
 
 def plot_temp_vs_day_of_year_by_hour(df):
-    df_hourly = resample_hourly(df)
+    df_hourly = resample(df, '1H')
     plot_hours(pivot_day_of_year(df_hourly.TemperatureF), 4, 4)
 
 
@@ -163,20 +170,20 @@ def plot_rain_vs_month_by_year(df, cumulative=False):
     rain_pivot_water_year.plot(kind='bar')
 
 def plot_temp_and_solar(df_solar, num_points, plot_pressure=False,
-        plot_wind=False):
+        plot_wind=False, tzinfo = pytz.timezone('US/Pacific')):
     # store first axis
     df_plot = df_solar.iloc[-num_points:,:]
-    ax = df_plot.SolarRadiation.plot()
+    ax = df_plot.SolarRadiationHoriz.plot()
     df_plot.TemperatureF.plot(secondary_y=True)
     if plot_pressure:
         df_plot.PressureIn.plot(secondary_y=True)
     if plot_wind:
         df_plot.WindSpeedMPH.plot(secondary_y=True)
-    tzinfo = pytz.timezone('US/Pacific')
-    ax.xaxis.set_minor_locator(dates.HourLocator(interval=6))
+    # ax.xaxis.set_minor_locator(dates.HourLocator(interval=6))
     ax.xaxis.grid(True, which='minor')
 
-def subplots(df, columns, start_date, end_date):
+def subplots(df, columns, start_date, end_date, tzinfo =
+        pytz.timezone('US/Pacific')):
     df_plot = df[(df.index >= start_date) & (df.index < end_date)]
     fig, axes = plt.subplots(nrows=len(columns), ncols=1, sharex=True)
     tzinfo = pytz.timezone('US/Pacific')
@@ -185,6 +192,7 @@ def subplots(df, columns, start_date, end_date):
         ax.legend(loc='upper right')
         ax.xaxis.set_minor_locator(dates.HourLocator(interval=6))
         ax.xaxis.grid(True, which='minor')
+        ax.yaxis.grid(True, which='major')
 
 def generate_all_figs(path):
     df = load_csv(path)
