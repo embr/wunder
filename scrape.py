@@ -95,9 +95,22 @@ class SolarInfoAtPlace(object):
       row_out['SolarRadiationNorm'] = 0
       row_out['SolarRadiationHoriz'] = 0
       return row_out
+
+    # SolarRadiationNorm is the solar radiation on a surface which is always
+    # normal (i.e. perpendicular) to the angle of the sun. This is usually not
+    # what you want.
     norm_rad = radiation.get_radiation_direct(dt, alt)
     row_out['SolarRadiationNorm']  = norm_rad
-    row_out['SolarRadiationHoriz'] = math.cos(math.radians(alt)) * norm_rad
+
+    # alt is angle from horizon to sun; we want angle from normal (which is
+    # vertical) so we subtract alt from 90 degrees (or pi / 2).
+    theta = math.pi / 2 - math.radians(alt)
+    row_out['alt_rad'] = math.radians(alt)
+    row_out['theta'] = theta
+
+    # SolarRadiationHoriz is the solar radiation on a surface which is
+    # horizontal (like the ground).
+    row_out['SolarRadiationHoriz'] = math.cos(theta) * norm_rad
     return row_out
 
 def add_solar_radiation(df, lat, lng):
@@ -115,9 +128,7 @@ def resample(df, rule):
       'PressureIn',
       'TemperatureF',
       'WindDirectionDegrees',
-      'WindSpeedMPH',
-      'SolarRadiationHoriz',
-      'SolarRadiation'
+      'WindSpeedMPH'
   ]
   agg_methods.update(dict(zip(avg_cols, ['mean'] * len(df.columns))))
 
